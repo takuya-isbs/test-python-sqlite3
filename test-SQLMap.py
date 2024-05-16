@@ -22,7 +22,7 @@ tmpfname = os.path.join(tmpd.name, 'test-sqlite3.db')
 conn = sqlite3.connect(tmpfname)
 
 print(f'tempfile: {tmpfname}')
-#conn = sqlite3.connect('test-sqlite3.db')
+
 c = conn.cursor()
 
 # ジャーナルモードをWALに設定  遅くなるようだ
@@ -45,9 +45,12 @@ class SQLObj():
 
 
 class SQLMap():
-    def __init__(self, cls, table_name):
+    def __init__(self, cls, table_name, clear=False):
         self.cls = cls
         self.table_name = table_name
+        self.c = conn.cursor()
+        if clear:
+            self.clear()
         self._count = 0
         # c.execute('''
         # CREATE TABLE IF NOT EXISTS {} (
@@ -55,7 +58,7 @@ class SQLMap():
         # value TEXT
         # )
         # '''.format(table_name))
-        c.execute('''
+        self.c.execute('''
         CREATE TABLE IF NOT EXISTS {} (
         key TEXT,
         value TEXT
@@ -63,7 +66,7 @@ class SQLMap():
         '''.format(table_name))
 
     def index(self):
-        c.execute('CREATE INDEX idx_key ON {} (key)'.format(self.table_name))
+        self.c.execute('CREATE INDEX idx_key ON {} (key)'.format(self.table_name))
 
     def count(self):
         return self._count
@@ -72,7 +75,7 @@ class SQLMap():
         serialized_data = self.cls.dumps(value)
         #print(serialized_data)
         #print(len(serialized_data))
-        c.execute('''
+        self.c.execute('''
         INSERT OR REPLACE INTO {} (key, value)
         VALUES (?, ?)
         '''.format(self.table_name), (key, serialized_data))
@@ -81,7 +84,7 @@ class SQLMap():
             conn.commit()
 
     def get(self, key):
-        result = c.execute('''
+        result = self.c.execute('''
         SELECT value FROM {} WHERE key = ?
         '''.format(self.table_name), (key,))
         row = result.fetchone()
@@ -89,7 +92,7 @@ class SQLMap():
 
     # sort: None, 'ASC', 'DESC'
     def iterator(self, sort=None, offset=0, limit=-1):
-        sql = f'SELECT key, value FROM {self.table_name}'
+        sql = f'SELECT key,value FROM {self.table_name}'
         if sort is not None:
             if sort.upper() == 'ASC':
                 sql += ' ORDER BY key ASC'
@@ -97,7 +100,7 @@ class SQLMap():
                 sql += ' ORDER BY key DESC'
         sql += f' LIMIT {limit} OFFSET {offset}'
         print(f'sql={sql}')
-        result = c.execute(sql)
+        result = self.c.execute(sql)
         while True:
             row = result.fetchone()
             if row is None:
@@ -105,14 +108,17 @@ class SQLMap():
             yield row[0], self.cls.loads(row[0], row[1])
 
     def clear(self):
-        c.execute('DROP TABLE IF EXISTS {}'.format(self.table_name))
+        self.c.execute('DROP TABLE IF EXISTS {}'.format(self.table_name))
 
 
 class SQLList():
-    def __init__(self, cls, table_name):
+    def __init__(self, cls, table_name, clear=False):
         self.cls = cls
         self.table_name = table_name
-        c.execute('''
+        self.c = conn.cursor()
+        if clear:
+            self.clear()
+        self.c.execute('''
         CREATE TABLE IF NOT EXISTS {} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         data BLOB
@@ -121,14 +127,14 @@ class SQLList():
 
     def insert(self, data, commit=False):
         serialized_data = self.cls.dumps(data, for_list=True)
-        c.execute('''
+        self.c.execute('''
         INSERT INTO {} (data) VALUES (?)
         '''.format(self.table_name), (serialized_data,))
         if commit:
             conn.commit()
 
     def get(self, data_id):
-        result = c.execute('SELECT id,data FROM {} WHERE id = ?'.format(self.table_name), (data_id,))
+        result = self.c.execute('SELECT id,data FROM {} WHERE id = ?'.format(self.table_name), (data_id,))
         row = result.fetchone()
         return self.cls.loads(row[0], row[1], for_list=True) if row else None
 
@@ -142,7 +148,7 @@ class SQLList():
                 sql += ' ORDER BY id DESC'
         sql += f' LIMIT {limit} OFFSET {offset}'
         print(f'sql={sql}')
-        result = c.execute(sql)
+        result = self.c.execute(sql)
         while True:
             row = result.fetchone()
             if row is None:
@@ -150,7 +156,20 @@ class SQLList():
             yield self.cls.loads(row[0], row[1], for_list=True)
 
     def clear(self):
-        c.execute('DROP TABLE IF EXISTS {}'.format(self.table_name))
+        self.c.execute('DROP TABLE IF EXISTS {}'.format(self.table_name))
+
+
+class Path(SQLObj):
+    def __init__(self, path):
+        self.path = path
+
+    @classmethod
+    def dumps(cls, obj, for_list=False):
+        return obj
+
+    @classmethod
+    def loads(cls, key, txt, for_list=False):
+        return txt
 
 
 class Entry(SQLObj):
@@ -221,9 +240,7 @@ class Entry(SQLObj):
 
 
 def test_many(num):
-    em = SQLMap(Entry, 'entrymap')
-    em.clear()
-    em = SQLMap(Entry, 'entrymap')
+    em = SQLMap(Entry, 'entrymap', clear=True)
 
     start_time = time.time()
     previous = start_time
@@ -264,6 +281,29 @@ def test_many(num):
     print(f'Data fetching 1/2 took {fetch1_time} seconds')
     print(f'Data fetching 2/2 took {fetch2_time} seconds')
 
+    start_time = time.time()
+    pl = SQLList(Path, 'sorted_pathlist')
+    for path, ent in em.iterator(sort='DESC'):
+        #print(f'DEBUG path={path}, ent={str(ent)}')
+        #print(f'DEBUG path={path}')
+        pl.insert(path)
+    create_sorted_time = time.time() - start_time
+    print(f'Sorted data creation took {create_sorted_time} seconds')
+
+    start_time = time.time()
+    if count > 100:
+        for path in pl.iterator():
+            ent = em.get(path)
+    else:
+        #for path in pl.iterator(sort='DESC'):
+        for path in pl.iterator():
+            #print('path: ' + path)
+            ent = em.get(path)
+            print('entry(sorted): ' + str(ent))
+    fetch3_time = time.time() - start_time
+    print(f'Data fetching (sorted) took {fetch3_time} seconds')
+
+
 def test():
     el = SQLList(Entry, 'entrylist')
     ent1 = Entry('abc1', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
@@ -286,7 +326,7 @@ def test():
     for ent in em.iterator(offset=1, sort='DESC'):
         print('from map: ' + str(ent))
 
-#test)
+#test()
 
 test_many(test_num)
 
