@@ -122,6 +122,19 @@ class Entry(SQLObj):
     TYPE_SYMLINK = 'S'
     TYPE_OTHER = 'O'
 
+    type_map = {
+        TYPE_FILE: 1,
+        TYPE_DIR: 2,
+        TYPE_SYMLINK: 3,
+        TYPE_OTHER: 4,
+    }
+    type_map_reverse = {v: k for k, v in type_map.items()}
+
+    user_map = {}
+    user_map_count = 0
+    group_map = {}
+    group_map_count = 0
+
     def __init__(self, path, mode, file_type, uname, gname,
                  size, mtime, linkname):
         self.path = path
@@ -133,36 +146,53 @@ class Entry(SQLObj):
         self.mtime = mtime
         self.linkname = linkname
 
+        cls = type(self)
+        print('um: ' + str(self.user_map))
+        um = cls.user_map.get(uname)
+        if um is None:
+            cls.user_map[uname] = self.user_map_count
+            cls.user_map_count += 1
+        gm = cls.group_map.get(gname)
+        if gm is None:
+            cls.group_map[gname] = self.group_map_count
+            cls.group_map_count += 1
+
     def __repr__(self):
-        return f'Entry(path={self.path},mode={self.mode})'
+        return f'Entry(path={self.path},mode={self.mode},user={self.uname},group={self.gname})'
 
     @classmethod
     def dumps(cls, obj):
-        return json.dumps([obj.path, obj.mode, obj.file_type, obj.uname, obj.gname, obj.size, obj.mtime, obj.linkname], separators=(',', ':'))
+        t = cls.type_map[obj.file_type]
+        u = cls.user_map[obj.uname]
+        g = cls.group_map[obj.gname]
+        return json.dumps([obj.path, obj.mode, t, u, g, obj.size, obj.mtime, obj.linkname], separators=(',', ':'))
 
     @classmethod
     def loads(cls, txt):
         o = json.loads(txt)
-        return Entry(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7])
+        t = cls.type_map_reverse[o[2]]
+        u = [key for key, val in cls.user_map.items() if val == o[3]][0]
+        g = [key for key, val in cls.group_map.items() if val == o[4]][0]
+        return Entry(o[0], o[1], t, u, g, o[5], o[6], o[7])
 
 
 def main():
     el = SQLList(Entry, 'entrylist')
     ent1 = Entry('abc1', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
-    ent2 = Entry('abc2', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
-    ent3 = Entry('abc3', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
-    el.insert(ent1)
-    el.insert(ent2)
-    el.insert(ent3)
+    ent2 = Entry('abc2', 0o777, Entry.TYPE_FILE, 'user1', 'group2', 0, 100, None)
+    ent3 = Entry('abc3', 0o777, Entry.TYPE_DIR, 'user2', 'group1', 0, 100, None)
+    ent4 = Entry('abc4', 0o777, Entry.TYPE_DIR, 'user3', 'group3', 0, 100, None)
+    allent = [ent1, ent2, ent3, ent4]
+    for e in allent:
+        el.insert(e)
     ent = el.get(2)
     print(ent)
     for ent in el.iterator(offset=1, sort='DESC'):
         print('???: ' + str(ent))
 
     em = SQLMap(Entry, 'entrymap')
-    em.put(ent1.path, ent1)
-    em.put(ent2.path, ent2)
-    em.put(ent3.path, ent3)
+    for e in allent:
+        em.put(e.path, e)
     ent = em.get(ent2.path)
     print(ent)
     for ent in em.iterator(offset=1, sort='DESC'):
