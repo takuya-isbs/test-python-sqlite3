@@ -1,6 +1,6 @@
 import sqlite3
 import resource
-import pickle
+import json
 
 # メモリ使用量を 512MB に制限
 max_memory = 512 * 1024 * 1024
@@ -17,8 +17,19 @@ c.execute('PRAGMA synchronous = OFF')
 # 64MBのキャッシュサイズ (単位: ページ, デフォルトは1024バイト/ページ)
 c.execute('PRAGMA cache_size = -64000')
 
+class SQLObj():
+    @classmethod
+    def dumps(cls, obj):
+        raise NotImplementedError
+
+    @classmethod
+    def loads(cls, txt):
+        raise NotImplementedError
+
+
 class SQLMap():
-    def __init__(self, table_name):
+    def __init__(self, cls, table_name):
+        self.cls = cls
         self.table_name = table_name
         c.execute('''
         CREATE TABLE IF NOT EXISTS {} (
@@ -28,7 +39,8 @@ class SQLMap():
         '''.format(table_name))
 
     def put(self, key, value, commit=False):
-        serialized_data = pickle.dumps(value)
+        serialized_data = self.cls.dumps(value)
+        print(serialized_data)
         print(len(serialized_data))
         c.execute('''
         INSERT OR REPLACE INTO {} (key, value)
@@ -42,7 +54,7 @@ class SQLMap():
         SELECT value FROM {} WHERE key = ?
         '''.format(self.table_name), (key,))
         row = result.fetchone()
-        return pickle.loads(row[0]) if row else None
+        return self.cls.loads(row[0]) if row else None
 
     # sort: None, 'ASC', 'DESC'
     def iterator(self, sort=None, offset=0, limit=-1):
@@ -59,11 +71,12 @@ class SQLMap():
             row = result.fetchone()
             if row is None:
                 break
-            yield pickle.loads(row[0])
+            yield self.cls.loads(row[0])
 
 
 class SQLList():
-    def __init__(self, table_name):
+    def __init__(self, cls, table_name):
+        self.cls = cls
         self.table_name = table_name
         c.execute('''
         CREATE TABLE IF NOT EXISTS {} (
@@ -73,7 +86,7 @@ class SQLList():
         '''.format(table_name))
 
     def insert(self, data, commit=False):
-        serialized_data = pickle.dumps(data)
+        serialized_data = self.cls.dumps(data)
         c.execute('''
         INSERT INTO {} (data) VALUES (?)
         '''.format(self.table_name), (serialized_data,))
@@ -83,7 +96,7 @@ class SQLList():
     def get(self, data_id):
         result = c.execute('SELECT data FROM {} WHERE id = ?'.format(self.table_name), (data_id,))
         row = result.fetchone()
-        return pickle.loads(row[0]) if row else None
+        return self.cls.loads(row[0]) if row else None
 
     # sort: None, 'ASC', 'DESC'
     def iterator(self, sort=None, offset=0, limit=-1):
@@ -100,10 +113,10 @@ class SQLList():
             row = result.fetchone()
             if row is None:
                 break
-            yield pickle.loads(row[0])
+            yield self.cls.loads(row[0])
 
 
-class Entry():
+class Entry(SQLObj):
     TYPE_FILE = 'F'
     TYPE_DIR = 'D'
     TYPE_SYMLINK = 'S'
@@ -123,9 +136,18 @@ class Entry():
     def __repr__(self):
         return f'Entry(path={self.path},mode={self.mode})'
 
+    @classmethod
+    def dumps(cls, obj):
+        return json.dumps([obj.path, obj.mode, obj.file_type, obj.uname, obj.gname, obj.size, obj.mtime, obj.linkname], separators=(',', ':'))
+
+    @classmethod
+    def loads(cls, txt):
+        o = json.loads(txt)
+        return Entry(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7])
+
 
 def main():
-    el = SQLList('entrylist')
+    el = SQLList(Entry, 'entrylist')
     ent1 = Entry('abc1', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
     ent2 = Entry('abc2', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
     ent3 = Entry('abc3', 0o777, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
@@ -137,7 +159,7 @@ def main():
     for ent in el.iterator(offset=1, sort='DESC'):
         print('???: ' + str(ent))
 
-    em = SQLMap('entrymap')
+    em = SQLMap(Entry, 'entrymap')
     em.put(ent1.path, ent1)
     em.put(ent2.path, ent2)
     em.put(ent3.path, ent3)
