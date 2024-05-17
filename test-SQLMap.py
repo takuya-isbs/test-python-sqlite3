@@ -34,6 +34,9 @@ c.execute('PRAGMA synchronous = OFF')
 # 64MBのキャッシュサイズ (単位: ページ, デフォルトは1024バイト/ページ)
 c.execute('PRAGMA cache_size = -64000')
 
+# https://www.sqlite.org/pragma.html#pragma_temp_store
+#c.execute('PRAGMA temp_store = MEMORY')
+
 class SQLObj():
     @classmethod
     def dumps(cls, obj):
@@ -99,7 +102,7 @@ class SQLMap():
             elif sort.upper() == 'DESC':
                 sql += ' ORDER BY key DESC'
         sql += f' LIMIT {limit} OFFSET {offset}'
-        print(f'sql={sql}')
+        #print(f'DEBUG sql={sql}')
         result = self.c.execute(sql)
         while True:
             row = result.fetchone()
@@ -147,7 +150,7 @@ class SQLList():
             elif sort.upper() == 'DESC':
                 sql += ' ORDER BY id DESC'
         sql += f' LIMIT {limit} OFFSET {offset}'
-        print(f'sql={sql}')
+        #print(f'DEBUG sql={sql}')
         result = self.c.execute(sql)
         while True:
             row = result.fetchone()
@@ -242,45 +245,80 @@ class Entry(SQLObj):
 def test_many(num):
     em = SQLMap(Entry, 'entrymap', clear=True)
 
+    ########################################################################
     start_time = time.time()
     previous = start_time
     for i in range(num):
-        path = hashlib.sha512(i.to_bytes(4, 'big')).hexdigest()
-        #path = hashlib.sha256(i.to_bytes(4, 'big')).hexdigest()
-        e = Entry(path, 0o755, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
-        em.put(e.path, e)
         if i % 1000000 == 0:
             now = time.time()
             print(f'progress: {i}/{num} | {now - previous} | {now - start_time}')
             previous = now
+        path = hashlib.sha512(i.to_bytes(4, 'big')).hexdigest()
+        #path = hashlib.sha256(i.to_bytes(4, 'big')).hexdigest()
+        e = Entry(path, 0o755, Entry.TYPE_FILE, 'user1', 'group1', 0, 100, None)
+        em.put(e.path, e)
+    now = time.time()
+    print(f'progress: {i+1}/{num} | {now - previous} | {now - start_time}')
     insertion_time = time.time() - start_time
     print(f'Data insertion took {insertion_time} seconds')
 
+    ########################################################################
     start_time = time.time()
     em.index()
     index_time = time.time() - start_time
     print(f'Data index creation took {index_time} seconds')
 
-    start_time = time.time()
+    ########################################################################
     count = em.count()
-    center = int(count/2)
-    if count > 100:
-        for path, ent in em.iterator(offset=0, limit=center, sort='DESC'):
-            pass
-        start_time2 = time.time()
-        for path, ent in em.iterator(offset=center, limit=-1, sort='DESC'):
-            pass
-    else:
-        for path, ent in em.iterator(offset=0, limit=center, sort='DESC'):
-            print('entry(part1): ' + str(ent))
-        start_time2 = time.time()
-        for path, ent in em.iterator(offset=center, limit=-1, sort='DESC'):
-            print('entry(part2): ' + str(ent))
-    fetch1_time = start_time2 - start_time
-    fetch2_time = time.time() - start_time2
-    print(f'Data fetching 1/2 took {fetch1_time} seconds')
-    print(f'Data fetching 2/2 took {fetch2_time} seconds')
 
+    ########################################################################
+    # start_time = time.time()
+    # center = int(count/2)
+    # if count > 100:
+    #     for path, ent in em.iterator(offset=0, limit=center, sort='DESC'):
+    #         pass
+    #     start_time2 = time.time()
+    #     for path, ent in em.iterator(offset=center, limit=-1, sort='DESC'):
+    #         pass
+    # else:
+    #     for path, ent in em.iterator(offset=0, limit=center, sort='DESC'):
+    #         print('entry(part1): ' + str(ent))
+    #     start_time2 = time.time()
+    #     for path, ent in em.iterator(offset=center, limit=-1, sort='DESC'):
+    #         print('entry(part2): ' + str(ent))
+    # fetch1_time = start_time2 - start_time
+    # fetch2_time = time.time() - start_time2
+    # print(f'Data fetching 1/2 took {fetch1_time} seconds')
+    # print(f'Data fetching 2/2 took {fetch2_time} seconds')
+
+    ########################################################################
+    # group_num = 1000
+    # if group_num > count:
+    #     group_num = count
+    # group_size = int(count / group_num)
+    # remainder = count % group_num
+    # # グループごとの範囲を定義
+    # ranges = []
+    # start_index = 0
+    # for i in range(group_num):
+    #     end_index = start_index + group_size + (1 if i < remainder else 0)
+    #     ranges.append((start_index, end_index))
+    #     start_index = end_index
+    # start_time = time.time()
+    # for start, end in ranges:
+    #     # LIMIT offset, count
+    #     limit = end - start
+    #     start_time2 = time.time()
+    #     for path, ent in em.iterator(offset=start, limit=limit, sort='DESC'):
+    #         if count <= 100:
+    #             print('entry(group{start}-{end}): ' + str(ent))
+    #     fetch_time = time.time() - start_time2
+    #     print(f'Data fetching ({start}-{end}) took {fetch_time} seconds')
+    # fetch_time = time.time() - start_time
+    # print(f'Data fetching total({group_num}*1/{group_num}) took {fetch_time} seconds')
+
+    ########################################################################
+    # ソートしたリストのテーブルを作成して利用
     start_time = time.time()
     pl = SQLList(Path, 'sorted_pathlist')
     for path, ent in em.iterator(sort='DESC'):
@@ -288,7 +326,7 @@ def test_many(num):
         #print(f'DEBUG path={path}')
         pl.insert(path)
     create_sorted_time = time.time() - start_time
-    print(f'Sorted data creation took {create_sorted_time} seconds')
+    print(f'Sorted table creation took {create_sorted_time} seconds')
 
     start_time = time.time()
     if count > 100:

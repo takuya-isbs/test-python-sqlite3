@@ -79,7 +79,7 @@ if total_rows != total_entries:
 
 # 各グループのサイズを計算
 group_num = 4
-group_size = total_entries / group_num
+group_size = int(total_entries / group_num)
 remainder = total_entries % group_num
 
 # グループごとの範囲を定義
