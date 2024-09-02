@@ -6,6 +6,9 @@ import time
 import sys
 import resource
 
+# usage:
+
+
 max_memory = 512 * 1024 * 1024
 resource.setrlimit(resource.RLIMIT_AS, (max_memory, max_memory))
 
@@ -31,8 +34,10 @@ total_entries = 100000000  # 1億エントリ
 #total_entries =  10000000 # 1000万
 #total_entries =  1000000 # 100万
 
-batch_size = 1000000  # バッチサイズ
+#batch_size = 1000000  # バッチサイズ
 #batch_size = 10000  # バッチサイズ
+batch_size = 1  # バッチサイズ
+progress_interval = 1000000
 
 start_time = time.time()
 previous = start_time
@@ -40,7 +45,8 @@ previous = start_time
 for i in range(total_entries, 0, -batch_size): # 降順
     data = []
     now = time.time()
-    print(f'progress: {i}/{total_entries} | {now - previous} | {now - start_time}')
+    if i % progress_interval == 0:
+        print(f'progress: {i}/{total_entries} | {now - previous} | {now - start_time}')
     previous = now
     for j in range(i, i + batch_size):
         # path, mode, file_type(str), uname, gname, size, mtime, linkname(str)
@@ -66,17 +72,18 @@ print(f'Data index creation took {index_time} seconds')
 #sort_time = time.time() - start_time
 #print(f'Data pre sorting took {sort_time} seconds')
 
-# グループごとに分けて取得
-start_time = time.time()
-
 # テーブルの全体数を取得
+start_time = time.time()
 c.execute("SELECT COUNT(*) FROM data")
 total_rows = c.fetchone()[0]
+count_time = time.time() - start_time
+print(f'Data counting took {count_time} seconds')
 
 if total_rows != total_entries:
     print(f'total_rows{total_rows} != total_entries{total_entries}')
     sys.exit(1)
 
+# グループごとに分けて取得
 # 各グループのサイズを計算
 group_num = 4
 group_size = int(total_entries / group_num)
@@ -100,8 +107,6 @@ for start, end in ranges:
     sorted_sql = f'SELECT * FROM data ORDER BY path DESC LIMIT {start}, {count}'
     group_sql.append(sorted_sql)
 
-sort2_time = time.time() - start_time
-print(f'Data sorting(prepare) took {sort2_time} seconds')
 
 # 最初の3行を表示
 start_time = time.time()
@@ -121,9 +126,8 @@ print(f'Data fetching(with sorting) (1) took {fetch_time} seconds')
 #     result = c.execute(g)
 #     for row in result.fetchmany(3):
 #         print(row)
-
-fetch_time = time.time() - start_time
-print(f'Data fetching(with sorting) (2) took {fetch_time} seconds')
+# fetch_time = time.time() - start_time
+# print(f'Data fetching(with sorting) (2) took {fetch_time} seconds')
 
 print("-------------------------------------------")
 # ジェネレータ関数を定義してデータを1エントリずつ取得する

@@ -7,6 +7,9 @@ import json
 import tempfile
 import hashlib
 
+# usage:
+# python3 test-SQLMap.py 1000 /tmp
+
 print(str(sys.argv))
 
 test_num = int(sys.argv[1])
@@ -25,8 +28,10 @@ print(f'tempfile: {tmpfname}')
 
 c = conn.cursor()
 
+# https://www.sqlite.org/pragma.html#pragma_journal_mode
 # ジャーナルモードをWALに設定  遅くなるようだ
 #c.execute('PRAGMA journal_mode = WAL')
+#c.execute('PRAGMA journal_mode')
 
 # 自動コミットを無効にする
 c.execute('PRAGMA synchronous = OFF')
@@ -36,6 +41,8 @@ c.execute('PRAGMA cache_size = -64000')
 
 # https://www.sqlite.org/pragma.html#pragma_temp_store
 #c.execute('PRAGMA temp_store = MEMORY')
+
+
 
 class SQLObj():
     @classmethod
@@ -370,9 +377,20 @@ test_many(test_num)
 
 #conn.commit()
 
+for ent in os.scandir(tmpd.name):
+    print('DEBUG: entry=' + ent.path)
+
+
+conn.close()
+
+
 # データベースファイルのサイズを取得
 db_size = os.path.getsize(tmpfname)
 # データベースファイルのサイズを表示
 print(f'Database Size: {db_size} bytes')
+
+
+for ent in os.scandir(tmpd.name):
+    print('DEBUG: entry=' + ent.path)
 
 tmpd.cleanup()
